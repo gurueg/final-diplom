@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'django_rest_passwordreset',
+    'drf_spectacular',
     'api',
 ]
 
@@ -177,5 +178,14 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
-    ]
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Orders API',
+    'DESCRIPTION': 'Api for workin with py diplom project',
+    'VERSION': '1.0.0',
+    'GENERIC_ADDITIONAL_PROPERTIES': None,
+    'AUTHENTICATION_WHITELIST': ['rest_framework.authentication.TokenAuthentication'],
 }

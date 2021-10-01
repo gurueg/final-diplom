@@ -12,7 +12,8 @@ from celery.decorators import task
 @task(name="on_change_order_status")
 def on_change_order_status(user_id, order_id):
     """
-    Отправляет пользователю с user_id письмо об изменении статуса заказа order_id
+    Отправляет пользователю с user_id письмо
+    об изменении статуса заказа order_id
     """
 
     user = User.objects.get(id=user_id)

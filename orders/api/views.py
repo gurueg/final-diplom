@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
+from rest_framework import serializers
 
 from django_rest_passwordreset.signals import reset_password_token_created
 
@@ -15,8 +16,12 @@ from django.contrib.auth import authenticate, login
 from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.dispatch import receiver
+
 from .email_events import on_register, on_password_reset,\
     on_change_order_status
+
+from drf_spectacular.utils import extend_schema, OpenApiResponse,\
+    inline_serializer
 
 from requests import get
 from yaml import load, Loader
@@ -29,18 +34,45 @@ from .models import User, Shop, Category, ProductModel,\
     Contact
 
 
+ok_data_response = OpenApiResponse(
+    inline_serializer(
+        name='Dict',
+        fields={
+            'Status': serializers.BooleanField()
+        }
+    )
+)
+error_data_response = OpenApiResponse(
+    inline_serializer(
+        name='Errors',
+        fields={
+            'Status': serializers.BooleanField(),
+            'Message': serializers.CharField()
+        }
+    ),
+    description='Returned text of exceptions in Message field'
+)
+
+
 # Create your views here.
 def health(request):
     return JsonResponse({'Status': 'OK'}, status=200)
 
 
+@extend_schema(
+    request=UserSerializer,
+    responses={
+        200: ok_data_response,
+        400: error_data_response,
+    },
+    auth=[{}]
+)
 @api_view(['POST', ])
 def register_user_view(request):
 
     """
     View для регистрации новых пользователей в системе
     """
-
     serializer = UserSerializer(data=request.data)
 
     if serializer.is_valid():
@@ -58,6 +90,13 @@ def register_user_view(request):
     return JsonResponse({'Status': True})
 
 
+@extend_schema(
+    responses={
+        200: ok_data_response,
+        400: error_data_response,
+    },
+    auth=[{}]
+)
 @api_view(['GET', ])
 def activate_user_view(request, uidb64, token):
     """
@@ -76,15 +115,30 @@ def activate_user_view(request, uidb64, token):
         user.is_activated = True
         user.save()
 
-        return JsonResponse({
-            'Status': True,
-            'Message': 'Thank you for your email confirmation.'})
+        return JsonResponse({'Status': True})
     else:
         return JsonResponse({
             'Status': False,
-            'Message': 'Activation link is invalid!'})
+            'Message': 'Activation link is invalid!'},
+            status=400)
 
 
+@extend_schema(
+    responses={
+        200: OpenApiResponse(
+            inline_serializer(
+                name='TokenData',
+                fields={
+                    'Status': serializers.BooleanField(),
+                    'Token': serializers.CharField()
+                }
+            ),
+            description='Return user auth token in "Token" field'
+        ),
+        400: error_data_response,
+    },
+    auth=[{}]
+)
 @api_view(['POST', ])
 def login_user_view(request):
 
@@ -107,7 +161,7 @@ def login_user_view(request):
         return JsonResponse({
             'Status': False,
             'Message': 'Invalid login/password'
-        })
+        }, status=400)
 
 
 @receiver(reset_password_token_created)
@@ -133,6 +187,18 @@ def reset_password_view(request, token):
     })
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='SendUrlForUpdate',
+        fields={
+            'url': serializers.URLField()
+        }
+    ),
+    responses={
+        200: ok_data_response,
+        400: error_data_response,
+    },
+)
 @api_view(['POST', ])
 def import_products_view(request):
 
@@ -143,13 +209,13 @@ def import_products_view(request):
             'Status': False,
             'Message': 'Non authorized user'
             },
-            status=403)
+            status=400)
 
     if request.user.usertype != 'shop':
         return JsonResponse({
             'Status': False,
             'Message': 'Only shops can import price lists'
-        }, status=403)
+        }, status=400)
 
     if 'url' in request.data.keys():
         yaml_data = get(request.data.get('url')).content
@@ -204,6 +270,19 @@ def import_products_view(request):
         }, status=400)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='ShopStatusUpdate',
+        fields={
+            'status': serializers.BooleanField()
+        }
+    ),
+    responses={
+        200: ok_data_response,
+        400: error_data_response,
+    },
+    description='Available only for users with "shop" usertype'
+)
 @api_view(['POST', ])
 def change_status_view(request):
 
@@ -214,13 +293,13 @@ def change_status_view(request):
             'Status': False,
             'Message': 'Non authorized user'
             },
-            status=403)
+            status=400)
 
     if request.user.usertype != 'shop':
         return JsonResponse({
             'Status': False,
             'Message': 'Only shops can have status'
-        }, status=403)
+        }, status=400)
 
     if 'status' in request.data.keys():
         is_updated = Shop.objects.filter(
@@ -244,6 +323,20 @@ class ProductsViewSet(ReadOnlyModelViewSet):
     """View для просмотра товаров"""
 
     # Просмотр списка всех товаров работающих магазинов
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='ProiductList',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'data': ProductModelSerializer(many=True)
+                    }
+                )
+            )
+        },
+        auth=[{}]
+    )
     def list(self, request):
         conditions = Q(shop__status=True)
 
@@ -264,6 +357,20 @@ class ProductsViewSet(ReadOnlyModelViewSet):
         return JsonResponse({"Status": True, "data": result.data})
 
     # Просмотр товара по ID
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='ProiductList',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'data': ProductModelSerializer()
+                    }
+                )
+            )
+        },
+        auth=[{}]
+    )
     def retrieve(self, request, pk=None):
         conditions = Q(shop__status=True) & Q(product__id=pk)
         query = ProductModel.objects.filter(conditions).\
@@ -280,13 +387,27 @@ class BasketView(APIView):
     """Класс для работы с корзиной пользователя"""
 
     # Получает всю корзину
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='ProiductList',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'data': OrderSerializer()
+                    }
+                )
+            ),
+            400: error_data_response,
+        }
+    )
     def get(self, request):
         if not request.user.is_authenticated:
             return JsonResponse({
                 'Status': False,
                 'Message': 'Non authorized user'
                 },
-                status=403)
+                status=400)
 
         user_id = request.user.id
 
@@ -302,13 +423,32 @@ class BasketView(APIView):
         return JsonResponse({"Status": True, "data": result.data})
 
     # Добавляем, меняем количество товаров или удаляем товар в корзине
+    @extend_schema(
+        request=inline_serializer(
+            name='BasketItemsList',
+            fields={
+                'items': inline_serializer(
+                    name='ConcreteItemRequest',
+                    fields={
+                        'model_id': serializers.IntegerField(),
+                        'quantity': serializers.IntegerField()
+                    },
+                    many=True
+                )
+            },
+        ),
+        responses={
+            200: ok_data_response,
+            400: error_data_response,
+        }
+    )
     def post(self, request):
         if not request.user.is_authenticated:
             return JsonResponse({
                 'Status': False,
                 'Message': 'Non authorized user'
                 },
-                status=403)
+                status=400)
 
         basket, created = Order.objects.get_or_create(
             user_id=request.user.id,
@@ -365,13 +505,25 @@ class BasketView(APIView):
         return JsonResponse({"Status": True})
 
     # удаляем товар из корзины
+    @extend_schema(
+        request=inline_serializer(
+            name='DeleteBasketItemsList',
+            fields={
+                'items': serializers.IntegerField()
+            }
+        ),
+        responses={
+            200: ok_data_response,
+            400: error_data_response,
+        }
+    )
     def delete(self, request):
         if not request.user.is_authenticated:
             return JsonResponse({
                 'Status': False,
                 'Message': 'Non authorized user'
                 },
-                status=403)
+                status=400)
 
         basket = Order.objects.filter(
             user_id=request.user.id,
@@ -381,7 +533,7 @@ class BasketView(APIView):
                 'Status': False,
                 'Message': 'Basket already empty'
                 },
-                status=403)
+                status=400)
 
         items = request.data.get('items')
         if items is None:
@@ -405,6 +557,12 @@ class BasketView(APIView):
         return JsonResponse({"Status": True})
 
 
+@extend_schema(
+    responses={
+        200: ok_data_response,
+        400: error_data_response,
+    }
+)
 @api_view(['POST', ])
 def order_confirmation_view(request):
 
@@ -414,7 +572,7 @@ def order_confirmation_view(request):
         return JsonResponse({
             'Status': False,
             'Message': 'Non authorized user'
-            }, status=403)
+            }, status=400)
 
     if 'contact_id' not in request.data.keys():
         return JsonResponse({'Status': False, 'Message': 'Contact ID needed'})
@@ -452,6 +610,13 @@ def order_confirmation_view(request):
     return JsonResponse({'Status': False, 'Message': error_message})
 
 
+@extend_schema(
+    responses={
+        200: OrderSerializer(many=True),
+        400: error_data_response,
+    },
+    description='Get List of orders with products from logged in shop user'
+)
 @api_view(['GET', ])
 def shop_orders_view(request):
 
@@ -462,13 +627,13 @@ def shop_orders_view(request):
             'Status': False,
             'Message': 'Non authorized user'
             },
-            status=403)
+            status=400)
 
     if request.user.usertype != 'shop':
         return JsonResponse({
             'Status': False,
             'Message': 'Only shops can see his orders'
-        }, status=403)
+        }, status=400)
 
     orders = Order.objects.filter(
         items__parameters__shop__user=request.user.id
@@ -498,6 +663,21 @@ class ContactsViewSet(ModelViewSet):
     serializer_class = ContactSerializer
 
     # Получаем список контактов пользователя
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='CreateContactResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': ContactSerializer(many=True)
+                    }
+                )
+            ),
+            400: error_data_response,
+        },
+        description='Get List of users contacts'
+    )
     def list(self, request):
         queryset = self.queryset.filter(user_id=request.user.id)
         serializer = ContactSerializer(queryset, many=True)
@@ -505,6 +685,22 @@ class ContactsViewSet(ModelViewSet):
         return JsonResponse({'Status': True, 'Data': serializer.data})
 
     # Добавляем новый контакт
+    @extend_schema(
+        request=ContactSerializer,
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='CreateContactResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': ContactSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        },
+        description='Add new contact for user'
+    )
     def create(self, request):
         request.data['user'] = request.user.id
         contact = self.serializer_class(data=request.data)
@@ -525,6 +721,13 @@ class ContactsViewSet(ModelViewSet):
             )
 
     # Удаляем один из контактов
+    @extend_schema(
+        responses={
+            200: ok_data_response,
+            400: error_data_response,
+        },
+        description='Add new contact for user'
+    )
     def destroy(self, request, pk=None):
         contact = self.queryset.filter(user=request.user, id=pk).first()
         if contact:
@@ -539,6 +742,22 @@ class ContactsViewSet(ModelViewSet):
             )
 
     # Обновление полей контакта методом PATCH
+    @extend_schema(
+        request=ContactSerializer,
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='CreateContactResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': ContactSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        },
+        description='Add new contact for user'
+    )
     def partial_update(self, request, pk=None):
         contact = self.queryset.filter(user=request.user, id=pk).first()
         if contact:
@@ -572,6 +791,22 @@ class ContactsViewSet(ModelViewSet):
             )
 
     # Обновление полей контакта методом PUT
+    @extend_schema(
+        request=ContactSerializer,
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='CreateContactResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': ContactSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        },
+        description='Add new contact for user'
+    )
     def update(self, request, pk=None):
         return self.partial_update(request, pk)
 
@@ -585,7 +820,21 @@ class OrderViewSet(ReadOnlyModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
 
-    # Получаем список контактов пользователя
+    # Получаем список заказов пользователя
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='ListOrdersResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': OrderSerializer(many=True)
+                    }
+                )
+            ),
+            400: error_data_response,
+        }
+    )
     def list(self, request):
         queryset = self.queryset.filter(user_id=request.user.id).exclude(
             status='basket'
@@ -598,6 +847,20 @@ class OrderViewSet(ReadOnlyModelViewSet):
         })
 
     # Получение заказа по ID
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='ListOrdersResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': OrderSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        }
+    )
     def retrieve(self, request, pk=None):
         orders = self.queryset.filter(user_id=request.user.id, id=pk).exclude(
             status='basket'
@@ -615,13 +878,27 @@ class UserView(APIView):
     """Класс для работы с данными пользователей"""
 
     # Получить данные текущего пользователя
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='UserDataResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': UserSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        }
+    )
     def get(self, request):
         if not request.user.is_authenticated:
             return JsonResponse({
                 'Status': False,
                 'Message': 'Non authorized user'
                 },
-                status=403)
+                status=400)
 
         serializer = UserSerializer(request.user)
         return JsonResponse({
@@ -630,13 +907,28 @@ class UserView(APIView):
         })
 
     # Изменяем данные пользователя
+    @extend_schema(
+        request=UserSerializer,
+        responses={
+            200: OpenApiResponse(
+                inline_serializer(
+                    name='UserDataResponse',
+                    fields={
+                        'Status': serializers.BooleanField(),
+                        'Data': UserSerializer
+                    }
+                )
+            ),
+            400: error_data_response,
+        }
+    )
     def put(self, request):
         if not request.user.is_authenticated:
             return JsonResponse({
                 'Status': False,
                 'Message': 'Non authorized user'
                 },
-                status=403)
+                status=400)
 
         serializer = UserSerializer(
             request.user,

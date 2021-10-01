@@ -6,7 +6,9 @@ from .views import register_user_view, activate_user_view,\
     login_user_view, import_products_view, change_status_view,\
     shop_orders_view, ProductsViewSet, BasketView,\
     order_confirmation_view, ContactsViewSet, reset_password_view,\
-    OrderViewSet, UserView, CategoryView, ProductView, ShopView, health
+    OrderViewSet, UserView, CategoryView, ShopView, health
+
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 router = DefaultRouter()
 router.register(r'api/v1/product', ProductsViewSet, basename='product')
@@ -23,7 +25,7 @@ urlpatterns = [
     url('api/v1/user/activate/(?P<uidb64>[0-9A-Za-z_\-]+)/(?P<token>[0-9A-Za-z]{1,13}-[0-9A-Za-z]{1,20})/$',
         activate_user_view, name='activate'),
     path(
-        'user/passwordreset_confirm/<str:token>/',
+        'api/v1/user/passwordreset_confirm/<str:token>/',
         reset_password_view,
         name='password_confirm'),
     path('api/v1/user/', UserView.as_view(), name='user'),
@@ -38,4 +40,13 @@ urlpatterns = [
     path('api/v1/shops/', ShopView.as_view(), name='shops'),
 
     path('', include(router.urls)),
+
+    path("schema/", SpectacularAPIView.as_view(), name="schema"),
+    path(
+        "docs/",
+        SpectacularSwaggerView.as_view(
+            url_name="schema"
+        ),
+        name="swagger-ui",
+    ),
 ]
